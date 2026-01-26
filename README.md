@@ -46,3 +46,45 @@ To evaluate memory usage, the out-of-core implementation was compared with a tra
 - Faster runtime
 - Larger resident memory footprint due to full-grid storage and aggressive OS buffering
 
+
+
+
+These results demonstrate that the **out-of-core formulation achieves a substantially lower memory footprint**, which is the primary objective of this prototype.
+
+---
+
+## Current Status
+
+- ✔ Correctness validated against an in-core Laplace solver
+- ✔ Memory usage measured and characterised
+- ✔ Boundary handling and convergence logic implemented
+- ❌ Not yet optimised for performance
+- ❌ File-based boundary exchange still used (to be replaced with in-memory structures)
+- ❌ No parallelisation yet
+
+---
+
+## Planned Improvements
+
+- Replace file-based boundary exchange with in-memory arrays
+- Parallelise block solves (OpenMP / task-based parallelism)
+- Extend to higher resolutions and dimensions
+- Explore acceleration via surrogate models (e.g. ML-based boundary prediction)
+- Investigate GPU acceleration for block solves
+
+---
+
+## Disclaimer
+
+This code is a **research prototype** intended for learning and exploration.  
+It is not optimised, production-ready, or numerically sophisticated compared to established PDE solvers.
+
+---
+
+## Author
+
+**Aayush Randeep**  
+BS–MS Physics, IISER Bhopal  
+Email: aayush21@iiserb.ac.in
+
+
