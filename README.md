@@ -55,22 +55,20 @@ These results demonstrate that the **out-of-core formulation achieves a substant
 
 ## Current Status
 
-- ✔ Correctness validated against an in-core Laplace solver
-- ✔ Memory usage measured and characterised
-- ✔ Boundary handling and convergence logic implemented
-- ❌ Not yet optimised for performance
-- ❌ File-based boundary exchange still used (to be replaced with in-memory structures)
-- ❌ No parallelisation yet
+Correctness validated against an in-core Laplace solver
+Memory usage measured and characterised
+Boundary handling and convergence logic implemented
+
 
 ---
 
 ## Planned Improvements
 
-- Replace file-based boundary exchange with in-memory arrays
-- Parallelise block solves (OpenMP / task-based parallelism)
-- Extend to higher resolutions and dimensions
-- Explore acceleration via surrogate models (e.g. ML-based boundary prediction)
-- Investigate GPU acceleration for block solves
+Replace file-based boundary exchange with in-memory arrays
+Parallelise block solves (OpenMP / task-based parallelism)
+Extend to higher resolutions and dimensions
+Explore acceleration via surrogate models (e.g. ML-based boundary prediction)
+Investigate GPU acceleration for block solves
 
 ---
 
