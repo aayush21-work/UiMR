@@ -1,0 +1,28 @@
+# binaries
+a.out
+laplace_umr
+laplace_uimr
+
+# data / output
+*.dat
+*.cache
+*.out
+
+
+# ===== python =====
+__pycache__/
+*.pyc
+*.pyo
+
+# ===== neovim =====
+*.swp
+*.swo
+*.swn
+*.swm
+*~
+.Session.vim
+Session.vim
+.netrwhist
+
+# ===== OS =====
+.DS_Store/
