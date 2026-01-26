@@ -1,6 +1,6 @@
 # Memory-Constrained Laplace Solver (UIMR Prototype)
 
-This repository contains a small prototype exploring **out-of-core / memory-constrained approaches** to solving elliptic partial differential equations, using the Laplace equation as a test case.
+I am working on **out-of-core / memory-constrained approaches** to differential equations, using the Laplace equation as a test case for now.
 
 The primary goal of this project is **memory scalability**, not raw performance. Runtime performance is considered a secondary objective and is expected to improve with parallelisation.
 
@@ -10,7 +10,7 @@ The primary goal of this project is **memory scalability**, not raw performance.
 
 Traditional numerical solvers for PDEs typically require holding the **entire computational grid in memory**. While this approach is efficient when memory is abundant, it becomes limiting for high-resolution problems or memory-constrained systems.
 
-This project explores whether it is possible to:
+Target:
 - solve PDEs **piecewise**
 - keep only a **small fraction of the domain in memory**
 - exchange information via **local boundary conditions**
