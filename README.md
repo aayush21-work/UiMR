@@ -57,11 +57,16 @@ These results demonstrate that the **out-of-core formulation achieves a substant
 
 Correctness validated against an in-core Laplace solver
 Memory usage measured and characterised
-Boundary handling and convergence logic implemented. Also optimised both the traditional solver and implemented a parallel version. The out of core version is around as fast as the in core version and takes less memory as well.
+Boundary handling and convergence logic implemented. Also optimised both the traditional solver and implemented a parallel version. The out-of-core version is around as fast as the in-core version and takes less memory as well.
+
+<p align="center">
+  <img src="src/uimr/benchmark/Figure_2.png" width="500">
+</p>
 
 
-
-
+<p align="center">
+  <img src="src/uimr/benchmark/solution_plot.png" width="500">
+</p>
 
 ---
 
