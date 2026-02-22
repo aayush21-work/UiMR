@@ -1,0 +1,12 @@
+#!/bin/bash
+
+
+echo Running....
+
+./laplace_uimr.o
+
+mv *.dat output
+
+echo Find all the chunks in the output directory
+
+

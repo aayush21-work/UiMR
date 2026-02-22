@@ -1,0 +1,24 @@
+#!/bin/bash
+
+echo "This a benchmark which solves the Laplace equation with a given boundary
+condition with 500x500 divisions with 25 domains on each axis."
+
+echo "Starting Benchmark"
+echo --------------------------------
+
+
+echo "In core"
+/usr/bin/env time -v ./laplace_umr
+
+echo "-------------------------------"
+
+echo "Out of Core CPU"
+/usr/bin/env time -v ./laplace_uimr_final
+
+echo "-------------------------------"
+
+
+rm -f *.dat
+
+
+
