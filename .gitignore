@@ -1,0 +1,17 @@
+benchmark
+*.o
+*.obj
+*.out
+*.exe
+*.a
+*.so
+*.lib
+*.dll
+
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+venv/
+
+.DS_Store
+Thumbs.db
