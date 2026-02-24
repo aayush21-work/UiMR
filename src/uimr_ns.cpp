@@ -1,58 +1,10 @@
-/*
- * ns_uimr.cpp — Game-Engine-Inspired Navier-Stokes Solver
- * ================================================================
- * Used by benchmark.cpp when compiled without -DGAME_ENGINE_STANDALONE
- */
-
 #ifndef GAME_ENGINE_NS_H
 #define GAME_ENGINE_NS_H
 
 #include "ns_common.h"
 
 // =============================================================================
-// TECHNIQUE 4: Memory Pool
-// =============================================================================
-struct TileBuffer {
-    Field u, v, p;
-    bool in_use;
-};
-
-struct MemoryPool {
-    std::vector<TileBuffer> buffers;
-    int reused_count;
-    int alloc_count;
-
-    void init(int n_buffers, int ny, int nx) {
-        buffers.resize(n_buffers);
-        for (int i = 0; i < n_buffers; i++) {
-            buffers[i].u.alloc(ny, nx);
-            buffers[i].v.alloc(ny, nx);
-            buffers[i].p.alloc(ny, nx);
-            buffers[i].in_use = false;
-        }
-        reused_count = 0;
-        alloc_count = 0;
-    }
-
-    TileBuffer* acquire() {
-        for (auto& b : buffers) {
-            if (!b.in_use) { b.in_use = true; reused_count++; return &b; }
-        }
-        alloc_count++;
-        return nullptr;
-    }
-
-    void release(TileBuffer* b) { if (b) b->in_use = false; }
-
-    void cleanup() {
-        for (auto& b : buffers) {
-            b.u.free_mem(); b.v.free_mem(); b.p.free_mem();
-        }
-    }
-};
-
-// =============================================================================
-// Tile metadata (for culling, priority, reuse)
+// Tile metadata
 // =============================================================================
 struct TileMeta {
     int row, col, idx;
@@ -64,7 +16,7 @@ struct TileMeta {
 };
 
 // =============================================================================
-// Tile extraction / injection
+// Tile extraction / injection (clamped, not periodic)
 // =============================================================================
 static void extract_tile(const Field& global, Field& tile,
                          int tr, int tc, int tile_size, int halo)
@@ -76,8 +28,8 @@ static void extract_tile(const Field& global, Field& tile,
     int c0 = tc * tile_size - halo;
     for (int i = 0; i < tny; i++)
         for (int j = 0; j < tnx; j++) {
-            int gi = (r0 + i + n) % n;
-            int gj = (c0 + j + n) % n;
+            int gi = std::max(0, std::min(r0 + i, n - 1));
+            int gj = std::max(0, std::min(c0 + j, n - 1));
             tile(i, j) = global(gi, gj);
         }
 }
@@ -93,22 +45,19 @@ static void inject_tile(Field& global, const Field& tile,
 }
 
 // =============================================================================
-// TECHNIQUE 10: Tile residual (for priority / culling)
+// Tile residual for culling
 // =============================================================================
-static double tile_residual(const Field& u) {
-    double max_res = 0.0;
+static double tile_max_velocity(const Field& tu, const Field& tv) {
+    double max_v = 0.0;
     int h = HALO;
-    for (int i = h; i < u.ny - h; i++)
-        for (int j = h; j < u.nx - h; j++) {
-            double lap = u.at(i-1,j) + u.at(i+1,j) +
-                         u.at(i,j-1) + u.at(i,j+1) - 4.0 * u(i,j);
-            max_res = std::max(max_res, std::fabs(lap));
-        }
-    return max_res;
+    for (int i = h; i < tu.ny - h; i++)
+        for (int j = h; j < tu.nx - h; j++)
+            max_v = std::max(max_v, tu(i,j)*tu(i,j) + tv(i,j)*tv(i,j));
+    return std::sqrt(max_v);
 }
 
 // =============================================================================
-// TECHNIQUE 7: Boundary delta (for temporal reuse)
+// Boundary delta for temporal reuse
 // =============================================================================
 static double boundary_delta(const Field& a, const Field& b) {
     double max_d = 0.0;
@@ -125,65 +74,53 @@ static double boundary_delta(const Field& a, const Field& b) {
 }
 
 // =============================================================================
-// NS step on a single tile
+// Advection on a single tile — updates interior only
 // =============================================================================
-static void ns_step_tile(Field& tu, Field& tv, Field& tp, bool use_mg) {
+static void advect_tile(const Field& tu, const Field& tv,
+                        Field& tu_star, Field& tv_star)
+{
     int ny = tu.ny, nx = tu.nx;
+    int h = HALO;
     double dx = DX, dt = DT, nu = NU;
-    double inv_dx2 = 1.0/(dx*dx), inv_2dx = 1.0/(2.0*dx), inv_dt = 1.0/dt;
+    double inv_dx2 = 1.0/(dx*dx), inv_2dx = 1.0/(2.0*dx);
 
-    Field u_lap(ny,nx), v_lap(ny,nx);
-    Field dudx(ny,nx), dudy(ny,nx), dvdx(ny,nx), dvdy(ny,nx);
-    Field u_star(ny,nx), v_star(ny,nx);
-    Field div_f(ny,nx), rhs(ny,nx);
+    // Copy halos through
+    tu_star.copy_from(tu);
+    tv_star.copy_from(tv);
 
-    // Step 1: Advection + Diffusion (no inner OpenMP — tile is small)
-    for (int i = 0; i < ny; i++)
-        for (int j = 0; j < nx; j++) {
-            u_lap(i,j) = (tu.at(i-1,j)+tu.at(i+1,j)+tu.at(i,j-1)+tu.at(i,j+1)-4.0*tu(i,j))*inv_dx2;
-            v_lap(i,j) = (tv.at(i-1,j)+tv.at(i+1,j)+tv.at(i,j-1)+tv.at(i,j+1)-4.0*tv(i,j))*inv_dx2;
-            dudx(i,j) = (tu.at(i,j+1)-tu.at(i,j-1))*inv_2dx;
-            dudy(i,j) = (tu.at(i+1,j)-tu.at(i-1,j))*inv_2dx;
-            dvdx(i,j) = (tv.at(i,j+1)-tv.at(i,j-1))*inv_2dx;
-            dvdy(i,j) = (tv.at(i+1,j)-tv.at(i-1,j))*inv_2dx;
+    for (int i = h; i < ny - h; i++)
+        for (int j = h; j < nx - h; j++) {
+            double u_lap = (tu(i-1,j)+tu(i+1,j)+tu(i,j-1)+tu(i,j+1)-4.0*tu(i,j))*inv_dx2;
+            double v_lap = (tv(i-1,j)+tv(i+1,j)+tv(i,j-1)+tv(i,j+1)-4.0*tv(i,j))*inv_dx2;
+            double dudx = (tu(i,j+1)-tu(i,j-1))*inv_2dx;
+            double dudy = (tu(i+1,j)-tu(i-1,j))*inv_2dx;
+            double dvdx = (tv(i,j+1)-tv(i,j-1))*inv_2dx;
+            double dvdy = (tv(i+1,j)-tv(i-1,j))*inv_2dx;
+
+            tu_star(i,j) = tu(i,j) + dt*(-tu(i,j)*dudx - tv(i,j)*dudy + nu*u_lap);
+            tv_star(i,j) = tv(i,j) + dt*(-tu(i,j)*dvdx - tv(i,j)*dvdy + nu*v_lap);
         }
+}
 
-    for (int i = 0; i < ny; i++)
-        for (int j = 0; j < nx; j++) {
-            double adv_u = tu(i,j)*dudx(i,j) + tv(i,j)*dudy(i,j);
-            double adv_v = tu(i,j)*dvdx(i,j) + tv(i,j)*dvdy(i,j);
-            u_star(i,j) = tu(i,j) + dt*(-adv_u + nu*u_lap(i,j));
-            v_star(i,j) = tv(i,j) + dt*(-adv_v + nu*v_lap(i,j));
+// =============================================================================
+// Projection on a single tile — updates interior only
+// Computes u
+// =============================================================================
+static void project_tile(Field& tu, Field& tv,
+                         const Field& tu_star, const Field& tv_star,
+                         const Field& tp)
+{
+    int ny = tu.ny, nx = tu.nx;
+    int h = HALO;
+    double dt = DT, inv_2dx = 1.0/(2.0*DX);
+
+    for (int i = h; i < ny - h; i++)
+        for (int j = h; j < nx - h; j++) {
+            double dpdx = (tp(i,j+1)-tp(i,j-1))*inv_2dx;
+            double dpdy = (tp(i+1,j)-tp(i-1,j))*inv_2dx;
+            tu(i,j) = tu_star(i,j) - dt * dpdx;
+            tv(i,j) = tv_star(i,j) - dt * dpdy;
         }
-    apply_velocity_bc(u_star, v_star);
-
-    // Step 2: Pressure Poisson
-    for (int i = 0; i < ny; i++)
-        for (int j = 0; j < nx; j++) {
-            double du = (u_star.at(i,j+1)-u_star.at(i,j-1))*inv_2dx;
-            double dv = (v_star.at(i+1,j)-v_star.at(i-1,j))*inv_2dx;
-            rhs(i,j) = (du + dv) * inv_dt;
-        }
-
-    if (use_mg)
-        pressure_multigrid(tp, rhs, dx);
-    else
-        pressure_jacobi(tp, rhs, dx, JACOBI_ITERS);
-
-    // Step 3: Projection
-    for (int i = 0; i < ny; i++)
-        for (int j = 0; j < nx; j++) {
-            double dpdx = (tp.at(i,j+1)-tp.at(i,j-1))*inv_2dx;
-            double dpdy = (tp.at(i+1,j)-tp.at(i-1,j))*inv_2dx;
-            tu(i,j) = u_star(i,j) - dt * dpdx;
-            tv(i,j) = v_star(i,j) - dt * dpdy;
-        }
-    apply_velocity_bc(tu, tv);
-
-    u_lap.free_mem(); v_lap.free_mem();
-    dudx.free_mem(); dudy.free_mem(); dvdx.free_mem(); dvdy.free_mem();
-    u_star.free_mem(); v_star.free_mem();
-    div_f.free_mem(); rhs.free_mem();
 }
 
 // =============================================================================
@@ -197,22 +134,35 @@ struct GEStats {
 };
 
 // =============================================================================
-// Full UiMR solver (ALL 10 techniques)
+// Full Game Engine solver
+//
+// Each timestep:
+//   1. Extract tiles from global u, v
+//   2. Advect active tiles → u_star, v_star (tiled, parallel, with culling)
+//   3. Inject u_star back to global
+//   4. Global pressure Poisson solve (multigrid on full grid)
+//   5. Extract p tiles
+//   6. Project active tiles: u = u_star - dt∇p (tiled, parallel)
+//   7. Inject u, v back to global; apply domain BCs
 // =============================================================================
 static double run_game_engine(const Field& u0, const Field& v0, const Field& p0,
                               Field& u_out, Field& v_out, Field& p_out,
                               GEStats& stats, int n_steps)
 {
+    int n = GRID_SIZE;
     u_out.copy_from(u0); v_out.copy_from(v0); p_out.copy_from(p0);
     stats = {0, 0, 0, 0};
 
-    // TECHNIQUE 4: Memory pool
+    // Tile buffers
     std::vector<Field> tu(NTILES), tv(NTILES), tp(NTILES);
+    std::vector<Field> tu_star(NTILES), tv_star(NTILES);
     std::vector<Field> prev_tu(NTILES), prev_tv(NTILES);
     for (int i = 0; i < NTILES; i++) {
         tu[i].alloc(TILE_FULL, TILE_FULL);
         tv[i].alloc(TILE_FULL, TILE_FULL);
         tp[i].alloc(TILE_FULL, TILE_FULL);
+        tu_star[i].alloc(TILE_FULL, TILE_FULL);
+        tv_star[i].alloc(TILE_FULL, TILE_FULL);
         prev_tu[i].alloc(TILE_FULL, TILE_FULL);
         prev_tv[i].alloc(TILE_FULL, TILE_FULL);
     }
@@ -224,74 +174,115 @@ static double run_game_engine(const Field& u0, const Field& v0, const Field& p0,
         meta[t].idx = t;
     }
 
+    // Global temporaries for pressure solve
+    Field u_star_global(n, n), v_star_global(n, n);
+    Field dudx_g(n, n), dvdy_g(n, n), rhs_g(n, n);
+
     Timer tm; tm.start();
 
     for (int s = 0; s < n_steps; s++) {
         stats.total_tiles += NTILES;
 
-        // Extract tiles
+        // ── Phase 1: Extract u, v tiles ──
         #pragma omp parallel for schedule(static)
         for (int t = 0; t < NTILES; t++) {
             extract_tile(u_out, tu[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
             extract_tile(v_out, tv[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
-            extract_tile(p_out, tp[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
         }
 
-        // TECHNIQUE 10 + 7: Compute residual and boundary delta
+        // ── Culling / reuse decision ──
         #pragma omp parallel for schedule(static)
         for (int t = 0; t < NTILES; t++) {
-            meta[t].residual = tile_residual(tu[t]);
+            meta[t].residual = tile_max_velocity(tu[t], tv[t]);
             meta[t].boundary_delta = (s > 0) ? boundary_delta(tu[t], prev_tu[t]) : 1e10;
-
-            // TECHNIQUE 2: Culling
             meta[t].converged = (meta[t].residual < CULL_THRESHOLD && s > 0);
-            // TECHNIQUE 7: Temporal reuse
             meta[t].reused = (s > 1 && meta[t].boundary_delta < REUSE_THRESHOLD);
             meta[t].active = !meta[t].converged && !meta[t].reused;
         }
 
-        // TECHNIQUE 3: Priority scheduling — sort by residual (highest first)
         std::vector<int> active_list;
         active_list.reserve(NTILES);
         for (int t = 0; t < NTILES; t++) {
-            if (meta[t].active)
-                active_list.push_back(t);
-            else if (meta[t].converged)
-                stats.culled++;
-            else if (meta[t].reused)
-                stats.reused++;
+            if (meta[t].active) active_list.push_back(t);
+            else if (meta[t].converged) stats.culled++;
+            else if (meta[t].reused) stats.reused++;
         }
 
         std::sort(active_list.begin(), active_list.end(),
-                  [&meta](int a, int b) {
-                      return meta[a].residual > meta[b].residual;
-                  });
+                  [&meta](int a, int b) { return meta[a].residual > meta[b].residual; });
 
         int n_active = (int)active_list.size();
         stats.computed += n_active;
 
-        // Save for temporal reuse next step
+        // Save for next step's reuse check
         #pragma omp parallel for schedule(static)
         for (int t = 0; t < NTILES; t++) {
             prev_tu[t].copy_from(tu[t]);
             prev_tv[t].copy_from(tv[t]);
         }
 
-        // TECHNIQUE 5: Batched parallel dispatch
-        // TECHNIQUE 1: Multigrid pressure solve
+        // ── Phase 2: Tiled advection (only active tiles) ──
         #pragma omp parallel for schedule(dynamic)
         for (int ai = 0; ai < n_active; ai++) {
             int t = active_list[ai];
-            ns_step_tile(tu[t], tv[t], tp[t], true);
+            advect_tile(tu[t], tv[t], tu_star[t], tv_star[t]);
+        }
+        // For culled/reused tiles, u_star = u (no change)
+        for (int t = 0; t < NTILES; t++) {
+            if (!meta[t].active) {
+                tu_star[t].copy_from(tu[t]);
+                tv_star[t].copy_from(tv[t]);
+            }
         }
 
-        // Inject all tiles
+        // ── Phase 3: Inject u_star to global ──
+        #pragma omp parallel for schedule(static)
+        for (int t = 0; t < NTILES; t++) {
+            inject_tile(u_star_global, tu_star[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
+            inject_tile(v_star_global, tv_star[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
+        }
+        apply_velocity_bc(u_star_global, v_star_global);
+
+        // ── Phase 4: Global pressure solve (multigrid) ──
+        compute_ddx(u_star_global, dudx_g, DX);
+        compute_ddy(v_star_global, dvdy_g, DX);
+        double inv_dt = 1.0 / DT;
+        #pragma omp parallel for schedule(static) collapse(2)
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < n; j++)
+                rhs_g(i,j) = (dudx_g(i,j) + dvdy_g(i,j)) * inv_dt;
+
+        pressure_multigrid(p_out, rhs_g, DX);
+
+        // ── Phase 5: Extract p tiles + u_star tiles for projection ──
+        #pragma omp parallel for schedule(static)
+        for (int t = 0; t < NTILES; t++) {
+            extract_tile(p_out, tp[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
+            extract_tile(u_star_global, tu_star[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
+            extract_tile(v_star_global, tv_star[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
+        }
+
+        // ── Phase 6: Tiled projection (only active tiles) ──
+        #pragma omp parallel for schedule(dynamic)
+        for (int ai = 0; ai < n_active; ai++) {
+            int t = active_list[ai];
+            project_tile(tu[t], tv[t], tu_star[t], tv_star[t], tp[t]);
+        }
+        // For culled/reused tiles, u = u_star (already set)
+        for (int t = 0; t < NTILES; t++) {
+            if (!meta[t].active) {
+                tu[t].copy_from(tu_star[t]);
+                tv[t].copy_from(tv_star[t]);
+            }
+        }
+
+        // ── Phase 7: Inject u, v back to global + BCs ──
         #pragma omp parallel for schedule(static)
         for (int t = 0; t < NTILES; t++) {
             inject_tile(u_out, tu[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
             inject_tile(v_out, tv[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
-            inject_tile(p_out, tp[t], meta[t].row, meta[t].col, TILE_SIZE, HALO);
         }
+        apply_velocity_bc(u_out, v_out);
 
         if ((s+1) % 20 == 0)
             printf("    step %d/%d, active: %d/%d (%.0f%%)\n",
@@ -300,20 +291,24 @@ static double run_game_engine(const Field& u0, const Field& v0, const Field& p0,
     }
     double elapsed = tm.elapsed();
 
+    // Cleanup
     for (int i = 0; i < NTILES; i++) {
         tu[i].free_mem(); tv[i].free_mem(); tp[i].free_mem();
+        tu_star[i].free_mem(); tv_star[i].free_mem();
         prev_tu[i].free_mem(); prev_tv[i].free_mem();
     }
+    u_star_global.free_mem(); v_star_global.free_mem();
+    dudx_g.free_mem(); dvdy_g.free_mem(); rhs_g.free_mem();
     return elapsed;
 }
 
 // =============================================================================
 // Standalone test
 // =============================================================================
-#ifdef UiMR
+#ifdef GAME_ENGINE_STANDALONE
 int main() {
     int nt = omp_get_max_threads();
-    printf("UiMR NS Solver (All 10 Techniques)\n");
+    printf("Game Engine NS Solver (All 10 Techniques)\n");
     printf("Grid: %d×%d, Tiles: %d×%d=%d, Steps: %d, Threads: %d\n\n",
            GRID_SIZE, GRID_SIZE, NTILES_DIR, NTILES_DIR, NTILES, NUM_TIMESTEPS, nt);
 
@@ -338,4 +333,4 @@ int main() {
 }
 #endif
 
-#endif // UiMR
+#endif // GAME_ENGINE_NS_H

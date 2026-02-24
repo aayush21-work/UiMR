@@ -12,7 +12,7 @@
  */
 
 #include "traditional_ns.cpp"
-#include "uimr_ns.cpp"
+#include "game_engine_ns.cpp"
 
 int main(int argc, char** argv)
 {
