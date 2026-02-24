@@ -64,22 +64,9 @@ These results demonstrate that the **out-of-core formulation achieves a substant
 
 - Implemented the Naviar Stokes Solution as well, using the technique. Tried to emulate the optimisations used by a game engine and developed compute equivalants for solving the PDE.
 
-## Results
 
 
-<p align="center">
-  <img src="src/uimr/benchmark/Figure_2.png" width="500">
-</p>
-
-
-<p align="center">
-  <img src="src/uimr/benchmark/solution_plot.png" width="500">
-</p>
-
----
-
-
-### Summary of the Techniques Used
+## Summary of the Techniques Used
 
 
 1. **Compute Culling:** Skips tiles that have converged (Frustum Culling analog).
