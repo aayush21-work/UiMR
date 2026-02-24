@@ -1,4 +1,4 @@
-# Memory-Constrained Laplace Solver (UIMR Prototype)
+# Memory-Constrained Solution of PDEs (Prototype)
 
 I am working on **out-of-core / memory-constrained approaches** to differential equations, using the Laplace equation as a test case for now.
 
