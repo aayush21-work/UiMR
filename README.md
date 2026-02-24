@@ -43,7 +43,7 @@ This prototype currently implements:
 To evaluate memory usage, the out-of-core implementation was compared with a traditional in-core Laplace solver using identical compiler optimisations (`-O3 -DNDEBUG -march=native`).
 
 ### In-Core Solver
-- Faster runtime
+- Comparable runtime
 - Larger resident memory footprint due to full-grid storage and aggressive OS buffering
 
 
